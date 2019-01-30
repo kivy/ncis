@@ -35,8 +35,8 @@ ncis_plugins = {
 def ncis_version():
     plugins = {
         name: {
-            "version": mod.get("__version__"),
-            "author": mod.get("__author__")
+            "version": getattr(mod, "__version__", None),
+            "author": getattr(mod, "__author__", None)
         } for name, mod in ncis_plugins.items()
     }
     return api_response({
@@ -45,7 +45,7 @@ def ncis_version():
     })
 
 
-def api_response(resp):
+def api_response(resp=None):
     """In a API endpoint, return a JSON "ok" response, with your response
     attached to it::
 
@@ -79,7 +79,7 @@ def api_error(error):
 
 
 def route_prefix(prefix, name, *largs, **kwargs):
-    return app.route("/{}{}".format(prefix, name))
+    return app.route("/{}{}".format(prefix, name), *largs, **kwargs)
 
 
 def install(host=None, port=None, plugins=None):
