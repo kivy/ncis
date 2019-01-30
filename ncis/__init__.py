@@ -4,7 +4,9 @@ NCIS
 
 import importlib
 import pkgutil
-from bottle import request, Bottle, abort, run
+import json
+import weakref
+from bottle import request, Bottle, abort, run, response
 from functools import partial
 from threading import Thread
 
@@ -30,19 +32,32 @@ ncis_plugins = {
     if name.startswith("ncis_")
 }
 
+#: List of all weakref to save for the json decoder
+ncis_weakrefs = {}
 
-@app.route("/_")
-def ncis_version():
-    plugins = {
-        name: {
-            "version": getattr(mod, "__version__", None),
-            "author": getattr(mod, "__author__", None)
-        } for name, mod in ncis_plugins.items()
-    }
-    return api_response({
-        "version": API_VERSION,
-        "plugins": plugins
-    })
+class PythonObjectEncoder(json.JSONEncoder):
+    def default(self, obj):
+        try:
+            return json.JSONEncoder.default(self, obj)
+        except TypeError:
+            ref_id = None
+            try:
+                ref = weakref.ref(obj)
+                ncis_weakrefs[id(ref)] = obj
+                ref_id = id(ref)
+            except TypeError:
+                pass
+            return {
+                "__pyobject__": {
+                    "type": type(obj).__name__,
+                    "id": ref_id
+                }
+            }
+
+
+def jsonify(val):
+    response.content_type = "application/json"
+    return json.dumps(val, cls=PythonObjectEncoder)
 
 
 def api_response(resp=None):
@@ -56,10 +71,10 @@ def api_response(resp=None):
     }
     ```
     """
-    return {
+    return jsonify({
         "status": "ok",
         "response": resp
-    }
+    })
 
 def api_error(error):
     """In a API endpoint, return a JSON "error" response, with your error
@@ -72,10 +87,10 @@ def api_error(error):
     }
     ```
     """
-    return {
+    return jsonify({
         "status": "error",
         "error": error
-    }
+    })
 
 
 def route_prefix(prefix, name, *largs, **kwargs):
@@ -108,3 +123,17 @@ def _run_ncis(host, port, plugins):
         ncis_plugins[name] = mod
 
     run(app, host=host, port=port)
+
+
+@app.route("/_")
+def ncis_version():
+    plugins = {
+        name: {
+            "version": getattr(mod, "__version__", None),
+            "author": getattr(mod, "__author__", None)
+        } for name, mod in ncis_plugins.items()
+    }
+    return api_response({
+        "version": API_VERSION,
+        "plugins": plugins
+    })
