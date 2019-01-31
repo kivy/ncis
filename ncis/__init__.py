@@ -125,7 +125,7 @@ def _run_ncis(host, port, plugins):
     run(app, host=host, port=port)
 
 
-@app.route("/_")
+@app.route("/_/version")
 def ncis_version():
     plugins = {
         name: {
@@ -137,3 +137,20 @@ def ncis_version():
         "version": API_VERSION,
         "plugins": plugins
     })
+
+
+@app.route("/_/endpoints")
+def ncis_endpoints():
+    endpoints = [route.rule for route in app.routes]
+    return api_response(endpoints)
+
+
+@app.route("/_/help/<path:path>")
+def ncis_help(path):
+    path = "/" + path
+    for route in app.routes:
+        if route.rule == path:
+            return api_response({
+                "doc": getattr(route.callback, "__doc__", None)
+            })
+    return api_error("Not found")
