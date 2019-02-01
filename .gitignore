@@ -5,3 +5,4 @@ SOURCES.txt
 dependency_link*
 requires.txt
 top_level.txt
+.DS_Store
