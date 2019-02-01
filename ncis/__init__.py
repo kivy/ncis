@@ -6,9 +6,13 @@ import importlib
 import pkgutil
 import json
 import weakref
-from bottle import request, Bottle, abort, run, response
+import time
+import sys
+from flask import Flask, request, Response
 from functools import partial
-from threading import Thread
+from threading import Thread, Event
+from time import sleep
+from collections import deque
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8765
@@ -17,11 +21,15 @@ API_VERSION = 1
 # internal
 _thread = None
 
-#: Global bottle application. You don't need to use it directly.
-app = Bottle()
+#: Global flask application. You don't need to use it directly.
+app = Flask("ncis")
 
 #: Route decorator for the NCIS app
 route = None
+
+#: (internal) Stream event to trigger the stream endpoint to flush
+stream_event = Event()
+stream_q = deque(maxlen=10000)
 
 #: List of the plugin automatically discovered that will be imported at
 #: :func:`install()`
@@ -43,8 +51,8 @@ class PythonObjectEncoder(json.JSONEncoder):
             ref_id = None
             try:
                 ref = weakref.ref(obj)
-                ncis_weakrefs[id(ref)] = obj
-                ref_id = id(ref)
+                ncis_weakrefs[id(ref)] = ref
+                ref_id = id(obj)
             except TypeError:
                 pass
             return {
@@ -55,9 +63,11 @@ class PythonObjectEncoder(json.JSONEncoder):
             }
 
 
-def jsonify(val):
-    response.content_type = "application/json"
-    return json.dumps(val, cls=PythonObjectEncoder)
+def jsonify(val, get_response=True):
+    data = json.dumps(val, cls=PythonObjectEncoder)
+    if get_response:
+        return Response(data, mimetype="application/json")
+    return data
 
 
 def api_response(resp=None):
@@ -97,7 +107,7 @@ def route_prefix(prefix, name, *largs, **kwargs):
     return app.route("/{}{}".format(prefix, name), *largs, **kwargs)
 
 
-def install(host=None, port=None, plugins=None):
+def install(host=None, port=None, plugins=None, redirect_stdout=True):
     global _thread
     if host is None:
         host = DEFAULT_HOST
@@ -106,10 +116,13 @@ def install(host=None, port=None, plugins=None):
     if plugins is None:
         plugins = list(ncis_plugins.keys())
 
+    if redirect_stdout:
+        install_stdout_redirect()
+
     _thread = Thread(target=_run_ncis, kwargs={
         "host": host,
         "port": port,
-        "plugins": plugins
+        "plugins": plugins,
     })
     _thread.daemon = True
     _thread.start()
@@ -122,7 +135,7 @@ def _run_ncis(host, port, plugins):
         mod = importlib.import_module(name)
         ncis_plugins[name] = mod
 
-    run(app, host=host, port=port)
+    app.run(host=host, port=port, threaded=True)
 
 
 @app.route("/_/version")
@@ -154,3 +167,48 @@ def ncis_help(path):
                 "doc": getattr(route.callback, "__doc__", None)
             })
     return api_error("Not found")
+
+
+def ncis_stream_push(event, data, binary=False):
+    if not binary:
+        data = jsonify(data, get_response=False)
+    stream_q.appendleft({"event": event, "data": data})
+    stream_event.set()
+
+
+def install_stdout_redirect():
+    class NCISProxyFile(object):
+        def __init__(self, name, pipe, *args, **kwargs):
+            super(NCISProxyFile, self).__init__(*args, **kwargs)
+            self.name = name
+            self.pipe = pipe
+
+        def write(self, buf, *args, **kw):
+            try:
+                ncis_stream_push(self.name, buf)
+            finally:
+                return self.pipe.write(buf, *args, **kw)
+
+        def flush(self, *args, **kw):
+            self.pipe.flush(*args, **kw)
+
+    sys.stdout = NCISProxyFile("stdout", sys.stdout)
+    sys.stderr = NCISProxyFile("stderr", sys.stderr)
+
+
+@app.route("/_/stream")
+def ncis_stream():
+    def _stream():
+        yield 'retry: 20000\n\n'
+        while True:
+            stream_event.wait(10)
+            stream_event.clear()
+            while True:
+                try:
+                    entry = stream_q.pop()
+                except IndexError:
+                    break
+
+                yield 'event: {}\n'.format(entry["event"])
+                yield 'data: {}\n\n'.format(entry["data"])
+    return Response(_stream(), mimetype="text/event-stream")
