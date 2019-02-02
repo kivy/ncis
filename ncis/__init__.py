@@ -48,17 +48,19 @@ class PythonObjectEncoder(json.JSONEncoder):
         try:
             return json.JSONEncoder.default(self, obj)
         except TypeError:
-            ref_id = None
+            ref_id = obj_id = None
             try:
                 ref = weakref.ref(obj)
-                ncis_weakrefs[id(ref)] = ref
-                ref_id = id(obj)
+                ref_id = id(ref)
+                ncis_weakrefs[ref_id] = ref
+                obj_id = id(obj)
             except TypeError:
                 pass
             return {
                 "__pyobject__": {
                     "type": type(obj).__name__,
-                    "id": ref_id
+                    "id": ref_id,
+                    "original_id": obj_id
                 }
             }
 
