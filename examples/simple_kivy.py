@@ -17,12 +17,15 @@ from kivy.lang import Builder
 
 KV = '''
 BoxLayout:
+    orientation: "vertical"
     Button:
-    Button
+    Image:
+        source: "data/logo/kivy-icon-512.png"
     Button
     BoxLayout:
+        orientation: "horizontal"
         Button
-        Button
+        TextInput
 '''
 
 class TestApp(App):
