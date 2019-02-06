@@ -31,7 +31,7 @@ setup(
         'Programming Language :: Python :: 3.7',
     ],
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
-    install_requires=['bottle'],
+    install_requires=['flask'],
     project_urls={
         'Bug Reports': 'https://github.com/kivy/ncis/issues',
         'Source': 'https://github.com/kivy/ncis/',
